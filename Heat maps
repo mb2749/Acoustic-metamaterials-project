@@ -1,0 +1,72 @@
+"""
+Heat map of ultrasound intensity vs radius and angle (sonic crystals project).
+
+Reads a tab-separated file with columns: Radius, Angle, I1, I2, I3
+(radius in mm, angle in degrees, intensities in mV).
+Makes two figures:
+  1. A polar heat map (the physical layout of the scan)
+  2. A rectangular radius-angle heat map (easier to read off values)
+"""
+
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+
+DATA_FILE = "sonic_crystal_data.txt"
+
+# ---------- Load and process ----------
+df = pd.read_csv(DATA_FILE, sep="\t")
+df["Radius"] = df["Radius"].ffill()          # handles files where radius is only on the first row of each block
+
+readings = df[["I1", "I2", "I3"]]
+df["Mean"] = readings.mean(axis=1)
+# Standard error of the mean from the three repeats
+df["SEM"] = readings.std(axis=1, ddof=1) / np.sqrt(readings.shape[1])
+
+# Reshape into a 2D grid: rows = angle, columns = radius
+grid = df.pivot_table(index="Angle", columns="Radius", values="Mean")
+radii = grid.columns.to_numpy(dtype=float)
+angles = grid.index.to_numpy(dtype=float)
+Z = grid.to_numpy()
+
+# Cell edges (so each measurement sits in the centre of its cell)
+def edges(centres):
+    d = np.diff(centres)
+    mid = centres[:-1] + d / 2
+    return np.concatenate(([centres[0] - d[0] / 2], mid, [centres[-1] + d[-1] / 2]))
+
+r_edges = edges(radii)
+a_edges = edges(angles)
+
+# Polar heat map
+fig1, ax1 = plt.subplots(subplot_kw={"projection": "polar"}, figsize=(7, 6))
+T, R = np.meshgrid(np.deg2rad(a_edges), r_edges, indexing="ij")
+mesh = ax1.pcolormesh(T, R, Z, cmap="rainbow", shading="flat")
+
+ax1.set_thetamin(a_edges[0])
+ax1.set_thetamax(a_edges[-1])
+ax1.set_rorigin(0)
+ax1.set_rlim(r_edges[0], r_edges[-1])
+ax1.set_xlabel("Radius / mm", labelpad=20)
+ax1.set_title("Mean intensity (polar)", pad=20)
+cb1 = fig1.colorbar(mesh, ax=ax1, pad=0.12)
+cb1.set_label("Mean intensity / mV")
+fig1.tight_layout()
+fig1.savefig("heatmap_polar.png", dpi=200)
+
+# Rectangular heat map
+fig2, ax2 = plt.subplots(figsize=(7, 6))
+mesh2 = ax2.pcolormesh(r_edges, a_edges, Z, cmap="rainbow", shading="flat")
+ax2.set_xlabel("Radius / mm")
+ax2.set_ylabel("Angle / degrees")
+ax2.set_xticks(radii)
+ax2.set_yticks(angles[::2])
+ax2.set_title("Mean intensity vs radius and angle")
+cb2 = fig2.colorbar(mesh2, ax=ax2)
+cb2.set_label("Mean intensity / mV")
+fig2.tight_layout()
+fig2.savefig("heatmap_rect.png", dpi=200)
+
+df.to_csv("processed_data.csv", index=False)
+
+plt.show()
